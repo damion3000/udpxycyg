@@ -495,9 +495,6 @@ sync_dsockbuf_len( int ssockfd, int dsockfd )
  */
 static int
 relay_traffic( int ssockfd, int dsockfd, struct server_ctx* ctx,
-             #ifdef UDPXY_FILEIO
-               int dfilefd,
-             #endif
                const struct ip_mreq* mreq )
 {
 #ifdef USE_SELECT_READY
@@ -509,9 +506,6 @@ relay_traffic( int ssockfd, int dsockfd, struct server_ctx* ctx,
     int rc = 0;
     ssize_t nmsgs = -1;
     ssize_t nrcv = 0, nsent = 0,
-         #ifdef UDPXY_FILEIO
-            nwr = 0,
-         #endif
             lrcv = 0, lsent = 0;
     char*  data = NULL;
     size_t data_len = g_uopt.rbuf_len;
@@ -654,17 +648,6 @@ relay_traffic( int ssockfd, int dsockfd, struct server_ctx* ctx,
             lsent = nsent;
         }
 
-#ifdef UDPXY_FILEIO
-        if( (dfilefd > 0) && (nrcv > 0) ) {
-            nwr = write_data( &ds, data, nrcv, dfilefd );
-            if( -1 == nwr )
-                break;
-            TRACE( check_fragments( "wrote to file",
-                    nrcv, lsent, nwr, t_delta, g_flog ) );
-            lsent = nwr;
-        }
-#endif /* UDPXY_FILEIO */
-
         if( ds.flags & F_SCATTERED ) reset_pkt_registry( &ds );
 
         if( uf_TRUE == g_uopt.cl_tpstat )
@@ -703,10 +686,6 @@ udp_relay( int sockfd, struct server_ctx* ctx )
     pid_t       new_pid;
     int         rc = 0, flags; 
     int         msockfd = -1, srcfd = -1;
-#ifdef UDPXY_FILEIO
-    int         sfilefd = -1, dfilefd = -1;
-    char        dfile_name[ MAXPATHLEN ];
-#endif /* UDPXY_FILEIO */
     size_t      rcvbuf_len = 0;
 
     assert( (sockfd > 0) && ctx );
@@ -780,55 +759,17 @@ udp_relay( int sockfd, struct server_ctx* ctx )
             break;
         }
 
-#ifdef UDPXY_FILEIO
-        dfilefd = -1;
-        if( NULL != g_uopt.dstfile ) {
-            (void) snprintf( dfile_name, MAXPATHLEN - 1,
-                    "%s.%d", g_uopt.dstfile, getpid() );
-            dfilefd = creat( dfile_name, S_IRUSR | S_IWUSR | S_IRGRP );
-            if( -1 == dfilefd ) {
-                mperror( g_flog, errno, "%s: g_uopt.dstfile open", __func__ );
-                rc = -1;
-                break;
-            }
-
-            TRACE( (void)tmfprintf( g_flog,
-                        "Dest file [%s] opened as fd=[%d]\n",
-                        dfile_name, dfilefd ) );
-        }
-/*        else dfilefd = -1;*/
-
-        if( NULL != g_uopt.srcfile ) {
-            sfilefd = open( g_uopt.srcfile, O_RDONLY | O_NOCTTY );
-            if( -1 == sfilefd ) {
-                mperror( g_flog, errno, "%s: g_uopt.srcfile open", __func__ );
-                rc = -1;
-            }
-            else {
-                TRACE( (void) tmfprintf( g_flog, "Source file [%s] opened\n",
-                            g_uopt.srcfile ) );
-                srcfd = sfilefd;
-            }
-        }
-        else
-#endif /* UDPXY_FILEIO */
-        {
-            rc = calc_buf_settings( NULL, &rcvbuf_len );
-            if (0 == rc ) {
-                rc = setup_mcast_listener( &addr,
-                                           &mreq,
-                                           &msockfd,
-                                           (g_uopt.nosync_sbuf ? 0 : rcvbuf_len) );
-                srcfd = msockfd;
-            }
+        rc = calc_buf_settings( NULL, &rcvbuf_len );
+        if (0 == rc ) {
+            rc = setup_mcast_listener( &addr,
+                                       &mreq,
+                                       &msockfd,
+                                       (g_uopt.nosync_sbuf ? 0 : rcvbuf_len) );
+            srcfd = msockfd;
         }
         if( 0 != rc ) break;
 
-        rc = relay_traffic( srcfd, sockfd, ctx,
-                          #ifdef UDPXY_FILEIO
-                            dfilefd,
-                          #endif
-                            &mreq );
+        rc = relay_traffic( srcfd, sockfd, ctx, &mreq );
         if( 0 != rc ) break;
 
     } while(0);
@@ -836,18 +777,7 @@ udp_relay( int sockfd, struct server_ctx* ctx )
     if( msockfd > 0 ) {
         close_mcast_listener( msockfd, &mreq );
     }
-#ifdef UDPXY_FILEIO
-    if( sfilefd > 0 ) {
-       (void) close( sfilefd );
-       TRACE( (void) tmfprintf( g_flog, "Source file [%s] closed\n",
-                            g_uopt.srcfile ) );
-    }
-    if( dfilefd > 0 ) {
-       (void) close( dfilefd );
-       TRACE( (void) tmfprintf( g_flog, "Dest file [%s] closed\n",
-                            dfile_name ) );
-    }
-#endif /* UDPXY_FILEIO */
+
     if( 0 != rc ) {
         (void) send_http_response( sockfd, 500, "Service error" );
     }
@@ -1266,11 +1196,8 @@ udpxy_main( int argc, char* const argv[] )
 /* support for -r -w (file read/write) option is disabled by default;
  * those features are experimental and for dev debugging ONLY
  * */
-#ifdef UDPXY_FILEIO
-    static const char UDPXY_OPTMASK[] = "TvSa:l:p:m:c:B:n:R:r:w:H:M:";
-#else
+
     static const char UDPXY_OPTMASK[] = "TvSa:l:p:m:c:B:n:R:H:M:";
-#endif
 
     struct sigaction qact, iact, cact, oldact;
 
@@ -1387,21 +1314,6 @@ udpxy_main( int argc, char* const argv[] )
                       }
                       break;
 
-    #ifdef UDPXY_FILEIO
-            case 'r':
-                      if( 0 != access(optarg, R_OK) ) {
-                        perror("source file - access");
-                        rc = ERR_PARAM;
-                        break;
-                      }
-
-                      g_uopt.srcfile = strdup( optarg );
-                      break;
-
-            case 'w':
-                      g_uopt.dstfile = strdup( optarg );
-                      break;
-    #endif /* UDPXY_FILEIO */
             case 'M':
                       g_uopt.mcast_refresh = (u_short)atoi( optarg );
 
