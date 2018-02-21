@@ -1,0 +1,134 @@
+diff -urp udpxy.mreq/netop.c udpxy.cygwin/netop.c
+--- udpxy.mreq/netop.c	2012-03-05 11:18:50.000000000 +0400
++++ udpxy.cygwin/netop.c	2012-03-05 11:25:30.000000000 +0400
+@@ -46,8 +46,11 @@ extern FILE* g_flog;    /* application l
+ int
+ setup_listener( const char* ipaddr, int port, int* sockfd, int bklog )
+ {
++#if !defined NO_SO_RCVLOWAT
+ #define LOWMARK 10 /* do not accept input of less than X octets */
+-    int rc, lsock, wmark = LOWMARK;
++    int wmark = LOWMARK;
++#endif
++    int rc, lsock;
+     struct sockaddr_in servaddr;
+     const int ON = 1;
+ 
+@@ -92,6 +95,7 @@ setup_listener( const char* ipaddr, int
+         rc = set_nblock (lsock, NONBLOCK);
+         if (0 != rc) break;
+ 
++#if !defined NO_SO_RCVLOWAT
+         TRACE( (void)tmfprintf (g_flog, "Setting low watermark for "
+             "server socket [%d] to [%d]\n", lsock, wmark) );
+         rc = setsockopt (lsock, SOL_SOCKET, SO_RCVLOWAT,
+@@ -101,6 +105,7 @@ setup_listener( const char* ipaddr, int
+                 __func__);
+             break;
+         }
++#endif
+ 
+         rc = bind( lsock, (struct sockaddr*)&servaddr, sizeof(servaddr) );
+         if( 0 != rc ) break;
+diff -urp udpxy.mreq/osdef.h udpxy.cygwin/osdef.h
+--- udpxy.mreq/osdef.h	2011-12-20 13:53:45.000000000 +0400
++++ udpxy.cygwin/osdef.h	2012-03-05 11:25:30.000000000 +0400
+@@ -38,11 +38,6 @@
+     #define NO_SOCKADDR_SA_LEN
+ #endif
+ 
+-#if defined(__CYGWIN__)
+-    #define NO_INET6_SUPPORT
+-    #define NO_SOCKADDR_SA_LEN
+-#endif
+-
+ #if defined(__linux)
+     #define NO_SOCKADDR_SA_LEN
+ #endif
+@@ -59,11 +54,19 @@
+     #define  Setlinebuf(a) setlinebuf(a)
+ #endif
+ 
++#if defined(__CYGWIN__)
++    #define NO_INET6_SUPPORT
++    #define NO_SOCKADDR_SA_LEN
++    #define NO_SO_RCVLOWAT
++    #define NO_MCAST_BIND
++    #define PIDFILE_DIR     "."
++#else
+ #if defined(HAS_VARRUN)
+     #define PIDFILE_DIR     "/var/run"
+ #elif defined(HAS_VARTMP)
+     #define PIDFILE_DIR     "/var/tmp"
+ #endif
++#endif
+ 
+ #endif /* UDPXY_OSDEFH_0101082158 */
+ 
+diff -urp udpxy.mreq/udpxrec.c udpxy.cygwin/udpxrec.c
+--- udpxy.mreq/udpxrec.c	2012-03-05 11:21:36.000000000 +0400
++++ udpxy.cygwin/udpxrec.c	2012-03-06 20:41:07.000000000 +0400
+@@ -282,7 +282,11 @@ subscribe( int* sockfd, struct ip_mreq*
+ 
+     sa.sin_family = AF_INET;
+     sa.sin_port = htons( (uint16_t)g_recopt.rec_port );
++#if defined(NO_MCAST_BIND)
++    sa.sin_addr.s_addr=htonl(INADDR_ANY);
++#else
+     (void) memcpy( &sa.sin_addr, &mreq->imr_multiaddr.s_addr, sizeof(struct in_addr) );
++#endif
+ 
+     rc = calc_buf_settings( NULL, &rcvbuf_len );
+     if (0 != rc) return rc;
+@@ -545,7 +549,9 @@ int udpxrec_main( int argc, char* const
+     time_t now = time(NULL);
+     char now_buf[ 32 ] = {0}, sel_buf[ 32 ] = {0}, app_finfo[80] = {0};
+ 
++#if !defined(__CYGWIN__)
+     extern int optind, optopt;
++#endif
+     extern const char IPv4_ALL[];
+ 
+     if( argc < 2 ) {
+@@ -757,7 +763,10 @@ int udpxrec_main( int argc, char* const
+             }
+         }
+ 
+-        if( 0 == geteuid() ) {
++#if !defined(__CYGWIN__)
++        if( 0 == geteuid() )
++#endif
++        {
+             if( !no_daemon ) {
+                 if( stderr == g_flog ) {
+                     (void) fprintf( stderr,
+diff -urp udpxy.mreq/udpxy.c udpxy.cygwin/udpxy.c
+--- udpxy.mreq/udpxy.c	2012-03-05 11:21:19.000000000 +0400
++++ udpxy.cygwin/udpxy.c	2012-03-06 20:40:21.000000000 +0400
+@@ -695,8 +695,13 @@ udp_relay( int sockfd, const char* param
+         }
+         addr.sin_family = AF_INET;
+         addr.sin_port = htons( (short)port );
++#if defined(NO_MCAST_BIND)
++        addr.sin_addr.s_addr=htonl(INADDR_ANY);
++#else
+         (void) memcpy( &addr.sin_addr, &mreq.imr_multiaddr.s_addr,
+                        sizeof(struct in_addr) );
++#endif
++
+     } while(0);
+ 
+     if( 0 != rc ) {
+@@ -1556,8 +1561,10 @@ udpxy_main( int argc, char* const argv[]
+                 rc = ERR_INTERNAL; break;
+             }
+         }
+-
+-        if( 0 == geteuid() ) {
++#if !defined(__CYGWIN__)
++        if( 0 == geteuid() )
++#endif
++        {
+             if( !no_daemon ) {
+                 if( stderr == g_flog ) {
+                     (void) fprintf( stderr,

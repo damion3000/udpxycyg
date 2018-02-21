@@ -1,0 +1,12 @@
+diff -ur ./udpxy.new.register.cygwin.tcpnodelay/udpxy.c ./udpxy.new.register.cygwin.tcpnodelay_dec_timeot/udpxy.c
+--- ./udpxy.new.register.cygwin.tcpnodelay/udpxy.c
++++ ./udpxy.new.register.cygwin.tcpnodelay_dec_timeot/udpxy.c
+@@ -370,7 +370,7 @@
+ pause_detect( int ntrans, time_t* p_pause  )
+ {
+     time_t now = 0;
+-    const double MAX_PAUSE_SEC = 5.0;
++    const double MAX_PAUSE_SEC = 1.0;
+ 
+     assert( p_pause );
+ 

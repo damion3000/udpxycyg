@@ -1,0 +1,119 @@
+diff -urp udpxy.orig/osdef.h udpxy.new/osdef.h
+--- udpxy.orig/osdef.h	2012-03-16 11:08:49.000000000 +0400
++++ udpxy.new/osdef.h	2012-03-16 11:07:05.000000000 +0400
+@@ -31,6 +31,7 @@
+ #define HAS_SETLINEBUF
+ #define HAS_VARRUN
+ #define HAS_VARTMP
++#define USE_SELECT_READY
+ 
+ #ifdef __hpux
+     #undef HAS_SOCKLEN
+@@ -40,6 +41,7 @@
+ 
+ #if defined(__linux)
+     #define NO_SOCKADDR_SA_LEN
++    #define USE_SELECT_READY
+ #endif
+ 
+ #ifndef HAS_SOCKLEN
+@@ -59,6 +61,7 @@
+     #define NO_SOCKADDR_SA_LEN
+     #define NO_SO_RCVLOWAT
+     #define NO_MCAST_BIND
++    #define USE_SELECT_READY
+     #define PIDFILE_DIR     "."
+ #else
+ #if defined(HAS_VARRUN)
+diff -urp udpxy.orig/udpxrec.c udpxy.new/udpxrec.c
+--- udpxy.orig/udpxrec.c	2012-03-11 13:31:50.000000000 +0400
++++ udpxy.new/udpxrec.c	2012-03-16 11:32:51.000000000 +0400
+@@ -301,6 +301,9 @@ subscribe( int* sockfd, struct ip_mreq*
+ static int
+ record()
+ {
++#ifdef USE_SELECT_READY
++    fd_set rfds;
++#endif
+     int rsock = -1, destfd = -1, rc = 0, wtime_sec = 0;
+     struct ip_mreq mreq;
+     struct timeval rtv;
+@@ -397,9 +400,20 @@ record()
+     /* record loop */
+     ropt.max_frgs = g_recopt.rbuf_msgs;
+     ropt.buf_tmout = -1;
++#ifdef USE_SELECT_READY
++    FD_ZERO( &rfds );
++    FD_SET( rsock, &rfds );
++#endif
+ 
+     for( n_total = 0; (0 == rc) && !(quit = must_quit()); ) {
+-        nrcv = read_data( &ds, rsock, data, g_recopt.bufsize, &ropt );
++#ifdef USE_SELECT_READY
++        rtv.tv_sec = RSOCK_TIMEOUT;
++        rtv.tv_usec = 0;
++        nrcv=0;
++        if ((select(rsock+1, &rfds, NULL, NULL, &rtv)>0) && FD_ISSET(rsock, &rfds))
++#endif
++          nrcv = read_data( &ds, rsock, data, g_recopt.bufsize, &ropt );
++
+         if( -1 == nrcv ) { rc = ERR_INTERNAL; break; }
+ 
+         if( 0 == n_total ) {
+diff -urp udpxy.orig/udpxy.c udpxy.new/udpxy.c
+--- udpxy.orig/udpxy.c	2012-03-16 11:08:49.000000000 +0400
++++ udpxy.new/udpxy.c	2012-03-16 11:06:10.000000000 +0400
+@@ -495,6 +495,10 @@ relay_traffic( int ssockfd, int dsockfd,
+              #endif
+                const struct ip_mreq* mreq )
+ {
++#ifdef USE_SELECT_READY
++    fd_set rfds, wfds;
++    struct timeval tv;
++#endif
+     volatile sig_atomic_t quit = 0;
+ 
+     int rc = 0;
+@@ -596,19 +600,39 @@ relay_traffic( int ssockfd, int dsockfd,
+     ropt.buf_tmout = g_uopt.dhold_tmout;
+ 
+     pause_time = 0;
+-
++#ifdef USE_SELECT_READY
++    FD_ZERO( &rfds );
++    FD_SET( ssockfd, &rfds );
++    FD_ZERO( &wfds );
++    FD_SET( dsockfd, &wfds );
++#endif
+     while( (0 == rc) && !(quit = must_quit()) ) {
+         if( g_uopt.mcast_refresh > 0 ) {
+             check_mcast_refresh( ssockfd, &rfr_tm, mreq );
+         }
+-        nrcv = read_data( &ds, ssockfd, data, data_len, &ropt );
+-        if( -1 == nrcv ) break;
++
++#ifdef USE_SELECT_READY
++        tv.tv_sec = ctx->rcv_tmout;
++        tv.tv_usec = 0;
++        if ((select(ssockfd+1, &rfds, NULL, NULL, &tv)>0) && FD_ISSET(ssockfd, &rfds)) {
++#endif
++            nrcv = read_data( &ds, ssockfd, data, data_len, &ropt );
++            if( -1 == nrcv ) break;
++#ifdef USE_SELECT_READY
++        } else break;
++#endif
+ 
+         TRACE( check_fragments( "received new", data_len,
+                     lrcv, nrcv, t_delta, g_flog ) );
+         lrcv = nrcv;
+ 
+         if( dsockfd && (nrcv > 0) ) {
++#ifdef USE_SELECT_READY
++          tv.tv_sec = ctx->snd_tmout;
++          tv.tv_usec = 0;
++          nsent = IO_BLK;
++          if ((select(dsockfd+1, NULL, &wfds, NULL, &tv)>0) && FD_ISSET(dsockfd, &wfds))
++#endif
+             nsent = write_data( &ds, data, nrcv, dsockfd );
+             if( -1 == nsent ) break;
+ 
