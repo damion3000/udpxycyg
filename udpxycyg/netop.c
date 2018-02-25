@@ -234,7 +234,9 @@ setup_mcast_listener( struct sockaddr_in*   sa,
         if( 0 != rc ) {
             mperror(g_flog, errno, "%s: setsockopt SO_REUSEPORT",
                     __func__);
+/*   No fatal error
             break;
+*/
         }
 #endif /* SO_REUSEPORT */
 
