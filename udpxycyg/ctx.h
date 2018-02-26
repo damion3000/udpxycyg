@@ -37,7 +37,7 @@
 /* throughput statistics */
 struct tput_stat {
     int32_t     sender_id;
-    double      nbytes;     /* how many bytes transferred */
+    ssize_t     nbytes;     /* how many bytes transferred */
     double      nsec;       /* within how many seconds    */
 };
 
@@ -60,10 +60,10 @@ struct client_ctx
 /* statistics on traffic relay & data gathering
  */
 struct tps_data {
-    pid_t  pid;         /* our PID - cached */
-    time_t tm_from;     /* last time update sent (successfully) */
-    double niter;       /* number of iterations since last try  */
-    double nbytes;      /* bytes transferred since last update  */
+    pid_t        pid;         /* our PID - cached */
+    time_t       tm_from;     /* last time update sent (successfully) */
+    unsigned int niter;       /* number of iterations since last try  */
+    ssize_t      nbytes;      /* bytes transferred since last update  */
 };
 
 

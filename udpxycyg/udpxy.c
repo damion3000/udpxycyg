@@ -646,12 +646,13 @@ relay_traffic( int ssockfd, int dsockfd, struct server_ctx* ctx,
             TRACE( check_fragments("sent", nrcv,
                         lsent, nsent, t_delta, g_flog) );
             lsent = nsent;
+            if(( uf_TRUE == g_uopt.cl_tpstat ) && ( nsent>0 ))
+              tpstat_update( ctx, &tps, nsent );
+
         }
 
         if( ds.flags & F_SCATTERED ) reset_pkt_registry( &ds );
 
-        if( uf_TRUE == g_uopt.cl_tpstat )
-            tpstat_update( ctx, &tps, nsent );
 
     } /* end of RELAY LOOP */
 

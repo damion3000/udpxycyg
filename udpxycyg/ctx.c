@@ -375,7 +375,7 @@ tpstat_read( struct server_ctx* ctx )
     }
 
     TRACE( (void)tmfprintf( g_flog,
-            "Received TSTAT={ sender=[%ld], bytes=[%f], seconds=[%f] }\n",
+            "Received TSTAT={ sender=[%ld], bytes=[%u], seconds=[%f] }\n",
             (long)ts.sender_id, ts.nbytes, ts.nsec) );
 
     cindex = find_client( ctx, (pid_t)ts.sender_id );
